@@ -2,24 +2,23 @@ package ru.altai.antimusor;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ComponentName;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
-import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.IBinder;
+import android.os.Parcel;
 import android.provider.Settings;
-import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
-
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 
 import rikka.shizuku.Shizuku;
 
@@ -41,10 +40,30 @@ public class MainActivity extends Activity {
     private TextView statusTitle, statusText, logView;
     private LinearLayout guideBox;
     private Button permBtn, bigBtn, scanBtn, restoreBtn, extraBtn, checkBtn;
-    private boolean ready = false, busy = false;
+    private boolean ready = false, busy = false, binding = false;
+
+    private IBinder shellBinder;
+    private Shizuku.UserServiceArgs svcArgs;
+
+    private final ServiceConnection conn = new ServiceConnection() {
+        @Override public void onServiceConnected(ComponentName name, IBinder b) {
+            shellBinder = b;
+            binding = false;
+            runOnUiThread(() -> { refresh(); log("✅ Shell-служба готова, можно работать."); });
+        }
+        @Override public void onServiceDisconnected(ComponentName name) {
+            shellBinder = null;
+            binding = false;
+            runOnUiThread(() -> refresh());
+        }
+    };
 
     private final Shizuku.OnBinderReceivedListener received = () -> runOnUiThread(this::refresh);
-    private final Shizuku.OnBinderDeadListener dead = () -> runOnUiThread(this::refresh);
+    private final Shizuku.OnBinderDeadListener dead = () -> runOnUiThread(() -> {
+        shellBinder = null;
+        binding = false;
+        refresh();
+    });
     private final Shizuku.OnRequestPermissionResultListener permResult =
             (rq, gr) -> runOnUiThread(this::refresh);
 
@@ -60,6 +79,7 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        try { if (svcArgs != null) Shizuku.unbindUserService(svcArgs, conn); } catch (Throwable ignored) {}
         Shizuku.removeBinderReceivedListener(received);
         Shizuku.removeBinderDeadListener(dead);
         Shizuku.removeRequestPermissionResultListener(permResult);
@@ -240,12 +260,31 @@ public class MainActivity extends Activity {
             try { granted = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED; }
             catch (Throwable ignored) {}
         }
-        ready = ping && granted;
+        if (ping && granted && shellBinder == null && !binding) {
+            binding = true;
+            try {
+                svcArgs = new Shizuku.UserServiceArgs(
+                        new ComponentName(getPackageName(), ShellService.class.getName()))
+                        .daemon(false)
+                        .processNameSuffix("shell")
+                        .debuggable(false)
+                        .version(1);
+                Shizuku.bindUserService(svcArgs, conn);
+            } catch (Throwable t) {
+                binding = false;
+                log("Не удалось запустить службу: " + t);
+            }
+        }
+        ready = ping && granted && shellBinder != null;
 
         if (ready) {
             statusTitle.setText("✅ Всё готово");
             statusTitle.setTextColor(0xFF3CE8B0);
-            statusText.setText("Shizuku работает. Жми большую кнопку.");
+            statusText.setText("Shizuku работает, shell-служба поднята. Жми большую кнопку.");
+        } else if (ping && granted) {
+            statusTitle.setText("⏳ Запускаю службу…");
+            statusTitle.setTextColor(0xFFFFB648);
+            statusText.setText("Разрешение есть, поднимаю shell-службу. Обычно пара секунд.");
         } else if (ping) {
             statusTitle.setText("⚠ Нужно разрешение");
             statusTitle.setTextColor(0xFFFFB648);
@@ -270,8 +309,7 @@ public class MainActivity extends Activity {
         scanBtn.setAlpha(ready && !b ? 1f : 0.4f);
         restoreBtn.setAlpha(ready && !b ? 1f : 0.4f);
         extraBtn.setAlpha(ready && !b ? 1f : 0.4f);
-        if (b) bigBtn.setText("Работаю…");
-        else bigBtn.setText("ОТКЛЮЧИТЬ ВСЁ ОДНОЙ КНОПКОЙ");
+        bigBtn.setText(b ? "Работаю…" : "ОТКЛЮЧИТЬ ВСЁ ОДНОЙ КНОПКОЙ");
     }
 
     /* ---------------- диалоги ---------------- */
@@ -333,31 +371,42 @@ public class MainActivity extends Activity {
     }
 
     private void exec(String script, String title) {
-        if (!ready) { toast("Сначала активируй Shizuku"); return; }
+        if (!ready || shellBinder == null) { toast("Сначала активируй Shizuku"); return; }
         log("\n▶ " + title);
         setBusy(true);
+        final IBinder b = shellBinder;
         new Thread(() -> {
             StringBuilder sb = new StringBuilder();
             int off = 0, on = 0, skip = 0, err = 0;
+            Parcel data = Parcel.obtain(), reply = Parcel.obtain();
             try {
-                Process p = Shizuku.newProcess(new String[]{"sh", "-c", script}, null, null);
-                BufferedReader br = new BufferedReader(new InputStreamReader(p.getInputStream()));
-                String line;
-                while ((line = br.readLine()) != null) {
+                data.writeString(script);
+                b.transact(1, data, reply, 0);
+                String out = reply.readString();
+                if (out == null) out = "ERR пустой ответ службы\n";
+                for (String line : out.split("\n")) {
                     if (line.startsWith("OFF ")) off++;
                     else if (line.startsWith("ON ")) on++;
                     else if (line.startsWith("SKIP ")) skip++;
                     else if (line.startsWith("ERR ")) err++;
                     sb.append(line).append('\n');
                 }
-                p.waitFor();
                 final String res = sb.toString();
                 final String sum = "отключено: " + off + " · включено: " + on +
                                    " · нет: " + skip + " · ошибок: " + err;
                 runOnUiThread(() -> { log(res + "✔ " + sum); setBusy(false); toast(sum); });
             } catch (Throwable t) {
                 final String e = String.valueOf(t);
-                runOnUiThread(() -> { log("Ошибка: " + e + "\nОбнови Shizuku и запусти её заново."); setBusy(false); });
+                runOnUiThread(() -> {
+                    log("Ошибка: " + e + "\nЗапусти Shizuku заново и повтори.");
+                    shellBinder = null;
+                    binding = false;
+                    setBusy(false);
+                    refresh();
+                });
+            } finally {
+                data.recycle();
+                reply.recycle();
             }
         }).start();
     }
