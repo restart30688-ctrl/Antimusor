@@ -5,6 +5,8 @@ import android.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -15,10 +17,14 @@ import android.os.Parcel;
 import android.provider.Settings;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import rikka.shizuku.Shizuku;
 
@@ -38,9 +44,14 @@ public class MainActivity extends Activity {
     private static final int REQ = 1001;
 
     private TextView statusTitle, statusText, logView;
-    private LinearLayout guideBox;
-    private Button permBtn, bigBtn, scanBtn, restoreBtn, extraBtn, checkBtn;
+    private LinearLayout guideBox, yandexRows;
+    private Button permBtn, bigBtn, scanBtn, restoreBtn, extraBtn, checkBtn, yandexBtn, launcherBtn;
     private boolean ready = false, busy = false, binding = false;
+
+    private final ArrayList<String> yandexAll = new ArrayList<>();
+    private final ArrayList<String> yandexPkgs = new ArrayList<>();
+    private final ArrayList<CheckBox> yandexChecks = new ArrayList<>();
+    private String launcherPkg = null;
 
     private IBinder shellBinder;
     private Shizuku.UserServiceArgs svcArgs;
@@ -71,6 +82,8 @@ public class MainActivity extends Activity {
         super.onCreate(b);
         getWindow().setStatusBarColor(0xFF0B1020);
         buildUi();
+        detectLauncher();
+        fillYandex();
         Shizuku.addBinderReceivedListenerSticky(received);
         Shizuku.addBinderDeadListener(dead);
         Shizuku.addRequestPermissionResultListener(permResult);
@@ -208,16 +221,31 @@ public class MainActivity extends Activity {
         root.addView(bigBtn);
 
         scanBtn = button("Проверить список (ничего не менять)", false);
-        scanBtn.setOnClickListener(v -> exec(scanScript(SAFE + " " + EXTRA), "Проверка списка"));
+        scanBtn.setOnClickListener(v -> exec(scanScript(SAFE + " " + EXTRA + " " + yandexJoined()), "Проверка списка"));
         root.addView(scanBtn);
 
         restoreBtn = button("Вернуть всё как было", false);
-        restoreBtn.setOnClickListener(v -> exec(restoreScript(SAFE + " " + EXTRA), "Восстановление"));
+        restoreBtn.setOnClickListener(v -> exec(restoreScript(SAFE + " " + EXTRA + " " + yandexJoined()), "Восстановление"));
         root.addView(restoreBtn);
 
         extraBtn = button("Дополнительно: лента Google (осторожно)", false);
         extraBtn.setOnClickListener(v -> confirmExtra());
         root.addView(extraBtn);
+
+        LinearLayout yx = card();
+        yx.addView(text("Лента Яндекса (свайп влево)", 16, 0xFFEEF2FF, true));
+        yx.addView(text("Найденные приложения Яндекса. Галочки уже стоят на поставщиках ленты. Отключи выбранные и перезапусти рабочий стол — свайп-страница исчезнет.", 13, 0xFFA9B4DC, false));
+        yandexRows = new LinearLayout(this);
+        yandexRows.setOrientation(LinearLayout.VERTICAL);
+        yx.addView(yandexRows);
+        yandexBtn = button("Отключить выбранное", false);
+        yandexBtn.setOnClickListener(v -> confirmYandex());
+        launcherBtn = button("Перезапустить рабочий стол", false);
+        launcherBtn.setOnClickListener(v -> restartLauncher());
+        yx.addView(yandexBtn);
+        yx.addView(launcherBtn);
+        yx.addView(text("Если Яндекс-приложений не нашлось: щипок по рабочему столу → Настройки → выключи «Лента новостей» / «Левый экран» (название может отличаться).", 12, 0xFF7C88B4, false));
+        root.addView(yx);
 
         LinearLayout man = card();
         man.addView(text("Ручные тумблеры рекламы", 16, 0xFFEEF2FF, true));
@@ -249,6 +277,87 @@ public class MainActivity extends Activity {
 
         root.addView(text("Отключается только для текущего пользователя. Системный раздел не трогается, обновления и гарантия целы.", 12, 0xFF7C88B4, false));
         setContentView(sv);
+    }
+
+    /* ---------------- Яндекс-лента ---------------- */
+
+    private void detectLauncher() {
+        try {
+            Intent h = new Intent(Intent.ACTION_MAIN);
+            h.addCategory(Intent.CATEGORY_HOME);
+            android.content.pm.ResolveInfo ri = getPackageManager().resolveActivity(h, 0);
+            if (ri != null && ri.activityInfo != null) launcherPkg = ri.activityInfo.packageName;
+        } catch (Throwable ignored) {}
+    }
+
+    private void fillYandex() {
+        yandexRows.removeAllViews();
+        yandexAll.clear(); yandexPkgs.clear(); yandexChecks.clear();
+        try {
+            PackageManager pm = getPackageManager();
+            List<PackageInfo> list = pm.getInstalledPackages(0);
+            for (PackageInfo pi : list) {
+                ApplicationInfo ai = pi.applicationInfo;
+                if (ai == null) continue;
+                String pn = ai.packageName;
+                String label = pm.getApplicationLabel(ai).toString();
+                String low = label.toLowerCase();
+                boolean rel = pn.contains("yandex") || low.contains("яндекс")
+                        || low.contains("дзен") || low.contains("yandex");
+                if (!rel) continue;
+                yandexAll.add(pn);
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setPadding(0, dp(6), 0, dp(6));
+                CheckBox cb = new CheckBox(this);
+                cb.setChecked(pn.contains("searchplugin") || pn.equals("ru.yandex.zen") || low.contains("дзен"));
+                LinearLayout tx = new LinearLayout(this);
+                tx.setOrientation(LinearLayout.VERTICAL);
+                tx.addView(text(label, 14, 0xFFDDE4FF, true));
+                TextView t2 = text(pn, 11, 0xFF8FA0CC, false);
+                t2.setTypeface(Typeface.MONOSPACE);
+                tx.addView(t2);
+                row.addView(cb);
+                row.addView(tx);
+                yandexRows.addView(row);
+                yandexChecks.add(cb);
+                yandexPkgs.add(pn);
+            }
+        } catch (Throwable t) {
+            log("Не удалось прочитать список приложений: " + t);
+        }
+        if (yandexAll.isEmpty()) {
+            yandexRows.addView(text("Яндекс-приложения не найдены.", 13, 0xFFA9B4DC, false));
+        }
+    }
+
+    private String yandexJoined() {
+        StringBuilder sb = new StringBuilder();
+        for (String p : yandexAll) sb.append(p).append(' ');
+        return sb.toString().trim();
+    }
+
+    private void confirmYandex() {
+        if (!ready) { toast("Сначала активируй Shizuku"); return; }
+        StringBuilder sel = new StringBuilder();
+        int n = 0;
+        for (int i = 0; i < yandexChecks.size(); i++) {
+            if (yandexChecks.get(i).isChecked()) { sel.append(yandexPkgs.get(i)).append(' '); n++; }
+        }
+        if (n == 0) { toast("Отметь хотя бы одно приложение"); return; }
+        final String pkgs = sel.toString().trim();
+        new AlertDialog.Builder(this)
+                .setTitle("Отключить ленту Яндекса?")
+                .setMessage("Будет отключено приложений: " + n + ". Лента при свайпе исчезнет. Возврат — кнопкой «Вернуть всё как было».")
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Отключить", (d, w) -> exec(disableScript(pkgs), "Лента Яндекса"))
+                .show();
+    }
+
+    private void restartLauncher() {
+        if (!ready) { toast("Сначала активируй Shizuku"); return; }
+        if (launcherPkg == null) { toast("Лаунчер не определён"); return; }
+        exec("am force-stop " + launcherPkg + "\necho OK рабочий стол перезапущен", "Перезапуск рабочего стола");
     }
 
     /* ---------------- состояние ---------------- */
@@ -305,10 +414,14 @@ public class MainActivity extends Activity {
         scanBtn.setEnabled(ready && !b);
         restoreBtn.setEnabled(ready && !b);
         extraBtn.setEnabled(ready && !b);
+        yandexBtn.setEnabled(ready && !b);
+        launcherBtn.setEnabled(ready && !b);
         bigBtn.setAlpha(ready && !b ? 1f : 0.4f);
         scanBtn.setAlpha(ready && !b ? 1f : 0.4f);
         restoreBtn.setAlpha(ready && !b ? 1f : 0.4f);
         extraBtn.setAlpha(ready && !b ? 1f : 0.4f);
+        yandexBtn.setAlpha(ready && !b ? 1f : 0.4f);
+        launcherBtn.setAlpha(ready && !b ? 1f : 0.4f);
         bigBtn.setText(b ? "Работаю…" : "ОТКЛЮЧИТЬ ВСЁ ОДНОЙ КНОПКОЙ");
     }
 
@@ -318,7 +431,7 @@ public class MainActivity extends Activity {
         if (!ready) { toast("Сначала активируй Shizuku"); return; }
         new AlertDialog.Builder(this)
                 .setTitle("Отключить мусор?")
-                .setMessage("Будут отключены: Glance/карусель, лента и ассистент, браузер, маркет, темы, облако, музыка, Hot Apps, Game Space, телеметрия, сервисы Facebook/Netflix.\n\nВсё можно вернуть кнопкой «Вернуть всё как было».")
+                .setMessage("Будут отключены: Glance/карусель, лента и ассистент, браузер, маркет, темы, облако, музыка, Hot Apps, Game Space, телеметрия, сервисы Facebook/Netflix.\n\nЛента Яндекса убирается отдельным блоком ниже. Всё можно вернуть кнопкой «Вернуть всё как было».")
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Поехали", (d, w) -> exec(disableScript(SAFE), "Отключение мусора"))
                 .show();
