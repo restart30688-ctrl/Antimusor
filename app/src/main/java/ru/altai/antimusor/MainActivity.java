@@ -79,7 +79,7 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
-        try { if (svcArgs != null) Shizuku.unbindUserService(svcArgs, conn); } catch (Throwable ignored) {}
+        try { if (svcArgs != null) Shizuku.unbindUserService(svcArgs, conn, true); } catch (Throwable ignored) {}
         Shizuku.removeBinderReceivedListener(received);
         Shizuku.removeBinderDeadListener(dead);
         Shizuku.removeRequestPermissionResultListener(permResult);
