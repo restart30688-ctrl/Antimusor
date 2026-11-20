@@ -15,6 +15,7 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.Parcel;
 import android.provider.Settings;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -44,15 +45,21 @@ public class MainActivity extends Activity {
     private static final int REQ = 1001;
 
     private TextView statusTitle, statusText, logView;
-    private LinearLayout guideBox, yandexRows;
-    private Button permBtn, bigBtn, scanBtn, restoreBtn, extraBtn, checkBtn, yandexBtn, launcherBtn;
+    private LinearLayout guideBox, yandexRows, catalogRows;
+    private Button permBtn, bigBtn, scanBtn, restoreBtn, extraBtn, checkBtn,
+            yandexBtn, launcherBtn, catMarkBtn, catHideBtn, catRemoveBtn;
     private boolean ready = false, busy = false, binding = false;
 
     private final ArrayList<String> yandexAll = new ArrayList<>();
     private final ArrayList<String> yandexPkgs = new ArrayList<>();
     private final ArrayList<CheckBox> yandexChecks = new ArrayList<>();
-    private String launcherPkg = null;
 
+    private final ArrayList<String> catAll = new ArrayList<>();
+    private final ArrayList<String> catPkgs = new ArrayList<>();
+    private final ArrayList<CheckBox> catChecks = new ArrayList<>();
+    private final ArrayList<Integer> catCats = new ArrayList<>();
+
+    private String launcherPkg = null;
     private IBinder shellBinder;
     private Shizuku.UserServiceArgs svcArgs;
 
@@ -84,6 +91,7 @@ public class MainActivity extends Activity {
         buildUi();
         detectLauncher();
         fillYandex();
+        fillCatalog();
         Shizuku.addBinderReceivedListenerSticky(received);
         Shizuku.addBinderDeadListener(dead);
         Shizuku.addRequestPermissionResultListener(permResult);
@@ -221,11 +229,11 @@ public class MainActivity extends Activity {
         root.addView(bigBtn);
 
         scanBtn = button("Проверить список (ничего не менять)", false);
-        scanBtn.setOnClickListener(v -> exec(scanScript(SAFE + " " + EXTRA + " " + yandexJoined()), "Проверка списка"));
+        scanBtn.setOnClickListener(v -> exec(scanScript(allTargets()), "Проверка списка"));
         root.addView(scanBtn);
 
         restoreBtn = button("Вернуть всё как было", false);
-        restoreBtn.setOnClickListener(v -> exec(restoreScript(SAFE + " " + EXTRA + " " + yandexJoined()), "Восстановление"));
+        restoreBtn.setOnClickListener(v -> exec(restoreScript(allTargets()), "Восстановление"));
         root.addView(restoreBtn);
 
         extraBtn = button("Дополнительно: лента Google (осторожно)", false);
@@ -246,6 +254,24 @@ public class MainActivity extends Activity {
         yx.addView(launcherBtn);
         yx.addView(text("Если Яндекс-приложений не нашлось: щипок по рабочему столу → Настройки → выключи «Лента новостей» / «Левый экран» (название может отличаться).", 12, 0xFF7C88B4, false));
         root.addView(yx);
+
+        LinearLayout ct = card();
+        ct.addView(text("Предустановленные приложения", 16, 0xFFEEF2FF, true));
+        ct.addView(text("VK, Одноклассники, Mail.ru, Маруся, Rutube, МойОфис и другие. «Скрыть» — отключить (иконка исчезнет, данные останутся). «Удалить для меня» — снести для текущего пользователя, данные сохранятся. Возврат — «Вернуть всё как было».", 13, 0xFFA9B4DC, false));
+        catalogRows = new LinearLayout(this);
+        catalogRows.setOrientation(LinearLayout.VERTICAL);
+        ct.addView(catalogRows);
+        catMarkBtn = button("Отметить рекомендованные", false);
+        catMarkBtn.setOnClickListener(v -> markRecommended());
+        catHideBtn = button("Скрыть выбранные (отключить)", false);
+        catHideBtn.setOnClickListener(v -> confirmCat(false));
+        catRemoveBtn = button("Удалить выбранные для меня", false);
+        catRemoveBtn.setOnClickListener(v -> confirmCat(true));
+        ct.addView(catMarkBtn);
+        ct.addView(catHideBtn);
+        ct.addView(catRemoveBtn);
+        ct.addView(text("Виджет «Выбрать контакт» и ярлык «Ускорение системы»: долгий тап → «Убрать / Удалить с рабочего стола». Mir Pay, Kaspersky и «Честный знак» лучше оставить — они полезные.", 12, 0xFF7C88B4, false));
+        root.addView(ct);
 
         LinearLayout man = card();
         man.addView(text("Ручные тумблеры рекламы", 16, 0xFFEEF2FF, true));
@@ -275,11 +301,11 @@ public class MainActivity extends Activity {
         lg.addView(clr);
         root.addView(lg);
 
-        root.addView(text("Отключается только для текущего пользователя. Системный раздел не трогается, обновления и гарантия целы.", 12, 0xFF7C88B4, false));
+        root.addView(text("Отключается и удаляется только для текущего пользователя. Системный раздел не трогается, обновления и гарантия целы.", 12, 0xFF7C88B4, false));
         setContentView(sv);
     }
 
-    /* ---------------- Яндекс-лента ---------------- */
+    /* ---------------- каталоги приложений ---------------- */
 
     private void detectLauncher() {
         try {
@@ -308,11 +334,13 @@ public class MainActivity extends Activity {
                 yandexAll.add(pn);
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
                 row.setPadding(0, dp(6), 0, dp(6));
                 CheckBox cb = new CheckBox(this);
                 cb.setChecked(pn.contains("searchplugin") || pn.equals("ru.yandex.zen") || low.contains("дзен"));
                 LinearLayout tx = new LinearLayout(this);
                 tx.setOrientation(LinearLayout.VERTICAL);
+                tx.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
                 tx.addView(text(label, 14, 0xFFDDE4FF, true));
                 TextView t2 = text(pn, 11, 0xFF8FA0CC, false);
                 t2.setTypeface(Typeface.MONOSPACE);
@@ -331,26 +359,138 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String yandexJoined() {
+    private void fillCatalog() {
+        catalogRows.removeAllViews();
+        catAll.clear(); catPkgs.clear(); catChecks.clear(); catCats.clear();
+        ArrayList<Object[]> found = new ArrayList<>();
+        try {
+            PackageManager pm = getPackageManager();
+            for (PackageInfo pi : pm.getInstalledPackages(0)) {
+                ApplicationInfo ai = pi.applicationInfo;
+                if (ai == null) continue;
+                String pn = ai.packageName;
+                if (yandexAll.contains(pn)) continue;
+                String label = pm.getApplicationLabel(ai).toString();
+                String low = label.toLowerCase();
+                boolean rel = pn.startsWith("ru.yandex") || pn.startsWith("com.yandex")
+                        || pn.startsWith("com.vk") || pn.startsWith("com.vkontakte")
+                        || pn.startsWith("ru.ok") || pn.startsWith("ru.mail")
+                        || pn.startsWith("ru.nspk") || pn.startsWith("com.kms")
+                        || pn.startsWith("ru.rutube") || pn.startsWith("ru.crpt")
+                        || pn.startsWith("ru.myoffice")
+                        || low.contains("яндекс") || low.contains("дзен") || low.contains("маруся")
+                        || low.contains("вконтакте") || low.contains("vk") || low.contains("одноклассники")
+                        || low.contains("mail.ru") || low.contains("почта") || low.contains("mir pay")
+                        || low.contains("мойофис") || low.contains("честный") || low.contains("kaspersky")
+                        || low.contains("касперский") || low.contains("rutube") || low.contains("рутуб")
+                        || low.contains("ускорение");
+                if (!rel) continue;
+                int cat;
+                if (pn.contains("nspk") || low.contains("mir pay") || low.contains("kaspersky")
+                        || low.contains("касперский") || low.contains("ускорение")) cat = 2;
+                else if (low.contains("дзен") || low.contains("маруся") || low.contains("rutube")
+                        || low.contains("рутуб") || pn.contains("rutube") || pn.contains("marusia")) cat = 0;
+                else cat = 1;
+                found.add(new Object[]{pn, label, cat});
+            }
+        } catch (Throwable t) {
+            log("Каталог: " + t);
+        }
+        found.sort((a, b) -> {
+            int c = Integer.compare((Integer) a[2], (Integer) b[2]);
+            return c != 0 ? c : ((String) a[1]).compareToIgnoreCase((String) b[1]);
+        });
+        for (Object[] o : found) {
+            String pn = (String) o[0];
+            String label = (String) o[1];
+            int cat = (Integer) o[2];
+            catAll.add(pn);
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, dp(6), 0, dp(6));
+            CheckBox cb = new CheckBox(this);
+            cb.setChecked(cat == 0);
+            LinearLayout tx = new LinearLayout(this);
+            tx.setOrientation(LinearLayout.VERTICAL);
+            tx.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            tx.addView(text(label, 14, 0xFFDDE4FF, true));
+            TextView t2 = text(pn, 11, 0xFF8FA0CC, false);
+            t2.setTypeface(Typeface.MONOSPACE);
+            tx.addView(t2);
+            TextView chip = text(cat == 0 ? "смело убирай" : cat == 1 ? "если не пользуешься" : "лучше оставить",
+                    10, cat == 0 ? 0xFF3CE8B0 : cat == 1 ? 0xFFFFB648 : 0xFF93A0CC, true);
+            chip.setBackground(round(cat == 0 ? 0x1F3CE8B0 : cat == 1 ? 0x1FFFB648 : 0x1F93A0CC, 8, 0));
+            chip.setPadding(dp(7), dp(3), dp(7), dp(3));
+            row.addView(cb);
+            row.addView(tx);
+            row.addView(chip);
+            catalogRows.addView(row);
+            catChecks.add(cb);
+            catPkgs.add(pn);
+            catCats.add(cat);
+        }
+        if (found.isEmpty()) {
+            catalogRows.addView(text("Предустановленные приложения из каталога не найдены.", 13, 0xFFA9B4DC, false));
+        }
+    }
+
+    private String join(ArrayList<String> list) {
         StringBuilder sb = new StringBuilder();
-        for (String p : yandexAll) sb.append(p).append(' ');
+        for (String p : list) sb.append(p).append(' ');
         return sb.toString().trim();
     }
 
+    private String allTargets() {
+        return (SAFE + " " + EXTRA + " " + join(yandexAll) + " " + join(catAll)).trim();
+    }
+
+    private String selected(ArrayList<CheckBox> checks, ArrayList<String> pkgs) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < checks.size(); i++) {
+            if (checks.get(i).isChecked()) sb.append(pkgs.get(i)).append(' ');
+        }
+        return sb.toString().trim();
+    }
+
+    private void markRecommended() {
+        int n = 0;
+        for (int i = 0; i < catChecks.size(); i++) {
+            if (catCats.get(i) <= 1) { catChecks.get(i).setChecked(true); n++; }
+        }
+        toast("Отмечено: " + n + ". Полезные приложения не тронуты.");
+        sUiLog();
+    }
+
+    private void sUiLog() { log("Отмечены рекомендованные к уборке приложения."); }
+
     private void confirmYandex() {
         if (!ready) { toast("Сначала активируй Shizuku"); return; }
-        StringBuilder sel = new StringBuilder();
-        int n = 0;
-        for (int i = 0; i < yandexChecks.size(); i++) {
-            if (yandexChecks.get(i).isChecked()) { sel.append(yandexPkgs.get(i)).append(' '); n++; }
-        }
-        if (n == 0) { toast("Отметь хотя бы одно приложение"); return; }
-        final String pkgs = sel.toString().trim();
+        String pkgs = selected(yandexChecks, yandexPkgs);
+        if (pkgs.isEmpty()) { toast("Отметь хотя бы одно приложение"); return; }
         new AlertDialog.Builder(this)
                 .setTitle("Отключить ленту Яндекса?")
-                .setMessage("Будет отключено приложений: " + n + ". Лента при свайпе исчезнет. Возврат — кнопкой «Вернуть всё как было».")
+                .setMessage("Лента при свайпе исчезнет. Возврат — кнопкой «Вернуть всё как было».")
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Отключить", (d, w) -> exec(disableScript(pkgs), "Лента Яндекса"))
+                .show();
+    }
+
+    private void confirmCat(boolean uninstall) {
+        if (!ready) { toast("Сначала активируй Shizuku"); return; }
+        String pkgs = selected(catChecks, catPkgs);
+        if (pkgs.isEmpty()) { toast("Отметь хотя бы одно приложение"); return; }
+        int n = pkgs.split(" ").length;
+        String msg = uninstall
+                ? "Будет удалено для текущего пользователя: " + n + " прил. Данные сохранятся, системный раздел не тронется. Возврат — «Вернуть всё как было»."
+                : "Будет скрыто и остановлено: " + n + " прил. Иконки исчезнут, данные останутся. Возврат — «Вернуть всё как было».";
+        new AlertDialog.Builder(this)
+                .setTitle(uninstall ? "Удалить выбранные для меня?" : "Скрыть выбранные?")
+                .setMessage(msg)
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton(uninstall ? "Удалить" : "Скрыть",
+                        (d, w) -> exec(uninstall ? uninstallScript(pkgs) : disableScript(pkgs),
+                                uninstall ? "Удаление для пользователя" : "Скрытие приложений"))
                 .show();
     }
 
@@ -410,18 +550,11 @@ public class MainActivity extends Activity {
 
     private void setBusy(boolean b) {
         busy = b;
-        bigBtn.setEnabled(ready && !b);
-        scanBtn.setEnabled(ready && !b);
-        restoreBtn.setEnabled(ready && !b);
-        extraBtn.setEnabled(ready && !b);
-        yandexBtn.setEnabled(ready && !b);
-        launcherBtn.setEnabled(ready && !b);
-        bigBtn.setAlpha(ready && !b ? 1f : 0.4f);
-        scanBtn.setAlpha(ready && !b ? 1f : 0.4f);
-        restoreBtn.setAlpha(ready && !b ? 1f : 0.4f);
-        extraBtn.setAlpha(ready && !b ? 1f : 0.4f);
-        yandexBtn.setAlpha(ready && !b ? 1f : 0.4f);
-        launcherBtn.setAlpha(ready && !b ? 1f : 0.4f);
+        Button[] all = {bigBtn, scanBtn, restoreBtn, extraBtn, yandexBtn, launcherBtn, catMarkBtn, catHideBtn, catRemoveBtn};
+        for (Button x : all) {
+            x.setEnabled(ready && !b);
+            x.setAlpha(ready && !b ? 1f : 0.4f);
+        }
         bigBtn.setText(b ? "Работаю…" : "ОТКЛЮЧИТЬ ВСЁ ОДНОЙ КНОПКОЙ");
     }
 
@@ -431,7 +564,7 @@ public class MainActivity extends Activity {
         if (!ready) { toast("Сначала активируй Shizuku"); return; }
         new AlertDialog.Builder(this)
                 .setTitle("Отключить мусор?")
-                .setMessage("Будут отключены: Glance/карусель, лента и ассистент, браузер, маркет, темы, облако, музыка, Hot Apps, Game Space, телеметрия, сервисы Facebook/Netflix.\n\nЛента Яндекса убирается отдельным блоком ниже. Всё можно вернуть кнопкой «Вернуть всё как было».")
+                .setMessage("Будут отключены: Glance/карусель, лента и ассистент, браузер, маркет, темы, облако, музыка, Hot Apps, Game Space, телеметрия, сервисы Facebook/Netflix.\n\nЛента Яндекса и предустановленные приложения убираются отдельными блоками ниже. Всё можно вернуть кнопкой «Вернуть всё как было».")
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Поехали", (d, w) -> exec(disableScript(SAFE), "Отключение мусора"))
                 .show();
@@ -461,8 +594,21 @@ public class MainActivity extends Activity {
                "done";
     }
 
+    private String uninstallScript(String pkgs) {
+        return "for p in " + pkgs + "; do\n" +
+               "  if pm path \"$p\" >/dev/null 2>&1; then\n" +
+               "    r=$(pm uninstall -k --user 0 \"$p\" 2>&1)\n" +
+               "    case \"$r\" in\n" +
+               "      *Success*) echo \"OFF $p (удалено для меня)\" ;;\n" +
+               "      *) echo \"ERR $p :: $r\" ;;\n" +
+               "    esac\n" +
+               "  else echo \"SKIP $p\"; fi\n" +
+               "done";
+    }
+
     private String restoreScript(String pkgs) {
         return "for p in " + pkgs + "; do\n" +
+               "  pm install-existing \"$p\" >/dev/null 2>&1\n" +
                "  if pm path \"$p\" >/dev/null 2>&1; then\n" +
                "    r=$(pm enable \"$p\" 2>&1)\n" +
                "    case \"$r\" in\n" +
@@ -507,7 +653,13 @@ public class MainActivity extends Activity {
                 final String res = sb.toString();
                 final String sum = "отключено: " + off + " · включено: " + on +
                                    " · нет: " + skip + " · ошибок: " + err;
-                runOnUiThread(() -> { log(res + "✔ " + sum); setBusy(false); toast(sum); });
+                runOnUiThread(() -> {
+                    log(res + "✔ " + sum);
+                    setBusy(false);
+                    fillYandex();
+                    fillCatalog();
+                    toast(sum);
+                });
             } catch (Throwable t) {
                 final String e = String.valueOf(t);
                 runOnUiThread(() -> {
